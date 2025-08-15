@@ -1,5 +1,7 @@
 # wb2kk
 
+[![CI](https://github.com/fikovnik/wb2kk/actions/workflows/ci.yml/badge.svg)](https://github.com/fikovnik/wb2kk/actions/workflows/ci.yml)
+
 Convert a [Wallabag](https://wallabag.it/) export (JSON) into [Karakeep](https://github.com/karakeep/karakeep) bookmarks JSON.
 
 - Input: Wallabag export JSON (array of items) — from file or stdin
