@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.asset_suffix }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            bin_ext: ""
+            asset_suffix: linux-x86_64
+            archive_ext: tar.gz
+          - os: macos-13
+            target: x86_64-apple-darwin
+            bin_ext: ""
+            asset_suffix: macos-x86_64
+            archive_ext: tar.gz
+          - os: macos-14
+            target: aarch64-apple-darwin
+            bin_ext: ""
+            asset_suffix: macos-aarch64
+            archive_ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bin_ext: ".exe"
+            asset_suffix: windows-x86_64
+            archive_ext: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: cargo test --all --locked --verbose
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare package
+        shell: bash
+        run: |
+          set -eux
+          APP_NAME=wb2kk
+          BIN="target/${{ matrix.target }}/release/${APP_NAME}${{ matrix.bin_ext }}"
+          test -f "$BIN"
+          PKG_DIR="dist/${APP_NAME}-${{ github.ref_name }}-${{ matrix.asset_suffix }}"
+          mkdir -p "$PKG_DIR"
+          cp "$BIN" "$PKG_DIR/"
+          # Include README if present
+          [ -f README.md ] && cp README.md "$PKG_DIR/"
+          # Include LICENSE if present
+          [ -f LICENSE ] && cp LICENSE "$PKG_DIR/"
+          if [ "${{ matrix.archive_ext }}" = "zip" ]; then
+            (cd dist && zip -r "${APP_NAME}-${{ github.ref_name }}-${{ matrix.asset_suffix }}.zip" "$(basename "$PKG_DIR")")
+          else
+            (cd dist && tar -czf "${APP_NAME}-${{ github.ref_name }}-${{ matrix.asset_suffix }}.tar.gz" "$(basename "$PKG_DIR")")
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wb2kk-${{ github.ref_name }}-${{ matrix.asset_suffix }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Gather files
+        id: gather
+        run: |
+          echo "files<<EOF" >> $GITHUB_OUTPUT
+          find dist -type f \( -name '*.zip' -o -name '*.tar.gz' \) -print >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+          files: ${{ steps.gather.outputs.files }}
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
